@@ -1,0 +1,6 @@
+{
+  "name": "ammonite",
+  "type": "module",
+  "version": "0.0.1",
+  "description": "Pure shell, pure kernel. One tree, many processors."
+}
