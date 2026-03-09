@@ -12,7 +12,7 @@
 // Navigate a tree by path. Read the underscore. That's it.
 
 export function nav(tree, path) {
-  if (path == null) return tree;
+  if (path == null || path === '') return tree;
   let n = tree;
   for (const d of String(path).split('.')) {
     if (!n || typeof n !== 'object') return null;
@@ -29,18 +29,31 @@ export function read(n) {
 // What THIS language can do. The octopus gets different hands.
 
 export const RT = {
+  // string
   split: (s, sep) => String(s).split(sep),
   chars: s => String(s).split(''),
+  join:  (a, sep) => a.join(sep),
+  cat:   (...p) => p.join(''),
+  // array
   get:   (a, i) => a[+i],
   len:   a => a.length,
   arr:   (...x) => x,
+  last:  a => a[a.length - 1],
+  init:  a => a.slice(0, -1),
+  range: n => Array.from({length: +n}, (_, i) => String(i)),
+  // number
   int:   s => parseInt(s),
   sub:   (a, b) => +a - +b,
   add:   (a, b) => +a + +b,
+  // logic
   eq:    (a, b) => a == b,
+  neq:   (a, b) => a != b,
   not:   a => !a,
-  join:  (a, sep) => a.join(sep),
-  cat:   (...p) => p.join(''),
+  and:   (a, b) => !!(a && b),
+  exists: a => a != null,
+  isobj: a => typeof a === 'object' && a !== null,
+  leaf:  a => typeof a !== 'object' || a === null,
+  id:    x => x,
 };
 
 // ---- THE UNFOLD ----
@@ -72,6 +85,19 @@ export function unfold(block, ctx) {
 
     if (op === 'return') return a[0];
     if (op === 'let') { ctx[String(a[0])] = a[1]; r[k] = a[1]; continue; }
+    if (op === 'guard') {
+      if (a[0]) { const fn = RT[String(a[1])] || ctx[String(a[1])]; return fn ? fn(...a.slice(2)) : a[1]; }
+      continue;
+    }
+    if (op === 'call') {
+      const blk = a[0];
+      if (blk && typeof blk === 'object') {
+        const cc = { ...ctx };
+        for (let i = 1; i < a.length; i += 2) cc[String(a[i])] = a[i + 1];
+        r[k] = unfold(blk, cc);
+      }
+      continue;
+    }
     if (op === 'if') {
       const br = nd[a[0] ? '1' : '2'];
       if (br) {
@@ -80,13 +106,14 @@ export function unfold(block, ctx) {
       }
       continue;
     }
-    if (op === 'each') {
+    if (op === 'each' || op === 'concat') {
       if (!Array.isArray(a[0])) { r[k] = []; continue; }
       const sub = { ...ctx }, out = [];
       for (let i = 0; i < a[0].length; i++) {
         sub.item = a[0][i]; sub.i = i;
         const v = unfold(nd, sub);
-        if (v !== undefined) out.push(v);
+        if (op === 'concat') { if (Array.isArray(v)) out.push(...v); }
+        else { if (v !== undefined) out.push(v); }
       }
       r[k] = out; continue;
     }
