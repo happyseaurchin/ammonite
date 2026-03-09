@@ -34,10 +34,12 @@ export const RT = {
   chars: s => String(s).split(''),
   join:  (a, sep) => a.join(sep),
   cat:   (...p) => p.join(''),
-  // array
+  // array / object
   get:   (a, i) => a[+i],
   len:   a => a.length,
   arr:   (...x) => x,
+  obj:   (...kv) => { const o = {}; for (let i = 0; i < kv.length; i += 2) o[String(kv[i])] = kv[i+1]; return o; },
+  push:  (a, ...x) => [...a, ...x],
   last:  a => a[a.length - 1],
   init:  a => a.slice(0, -1),
   range: n => Array.from({length: +n}, (_, i) => String(i)),
@@ -50,6 +52,7 @@ export const RT = {
   neq:   (a, b) => a != b,
   not:   a => !a,
   and:   (a, b) => !!(a && b),
+  or:    (a, b) => !!(a || b),
   exists: a => a != null,
   isobj: a => typeof a === 'object' && a !== null,
   leaf:  a => typeof a !== 'object' || a === null,
