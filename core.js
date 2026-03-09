@@ -1,199 +1,99 @@
-// AMMONITE CORE — The button.
+// AMMONITE KEY — JavaScript
 //
-// Stage 0: Navigate + Read. The irreducible kernel.
-// Stage 1: Runtime primitives. The screwdriver — what THIS language can do.
-// Stage 2: Unfold. Read a Mode 4 block, execute it step by step.
+// The button:      nav + read (~10 lines)
+// The screwdriver: RT primitives (~12 lines, language-specific)
+// The unfold:      execute Mode 4 blocks (~25 lines)
 //
-// Everything else — BSP, the twist, policies — unfolds from the touchstone.
-// The touchstone carries Mode 4 blocks (programs as pscale trees).
-// Depth is sequence. Siblings are branches. The kernel walks them.
-//
-// The octopus presses the same button but gets different tools:
-// a Python kernel maps "split" to str.split(), a Rust kernel to .split().
-// The Mode 4 blocks are the same. The runtime primitives are different.
+// A Python key maps the same op names to Python built-ins.
+// A Rust key maps them to Rust. The Mode 4 blocks don't change.
 // Same recipe, different kitchen.
 
-// ============ STAGE 0: THE BUTTON ============
+// ---- THE BUTTON ----
 // Navigate a tree by path. Read the underscore. That's it.
 
 export function nav(tree, path) {
-  if (path === undefined || path === null) return tree;
-  let node = tree;
+  if (path == null) return tree;
+  let n = tree;
   for (const d of String(path).split('.')) {
-    if (!node || typeof node !== 'object') return null;
-    node = node[d];
+    if (!n || typeof n !== 'object') return null;
+    n = n[d];
   }
-  return node;
+  return n;
 }
 
-export function read(node) {
-  if (node === null || node === undefined) return null;
-  if (typeof node === 'string') return node;
-  if (typeof node === 'object' && node['_'] !== undefined) return node['_'];
-  return null;
+export function read(n) {
+  return n == null ? null : typeof n === 'string' ? n : n?._ ?? null;
 }
 
-// ============ STAGE 1: THE SCREWDRIVER ============
-// Runtime primitives. These are what the LANGUAGE can do natively.
-// A Python core.py would map the same names to Python built-ins.
-// The Mode 4 blocks don't change. Only this map does.
+// ---- THE SCREWDRIVER ----
+// What THIS language can do. The octopus gets different hands.
 
 export const RT = {
-  // String
-  split:   (s, sep) => String(s).split(sep),
-  join:    (arr, sep) => arr.join(sep),
-  chars:   (s) => String(s).split(''),
-  cat:     (...parts) => parts.join(''),
-  trim:    (s) => String(s).replace(/0+$/, ''),
-
-  // Array
-  get:     (a, i) => a[parseInt(i, 10)],
-  len:     (a) => a.length,
-  push:    (a, v) => { const c = [...a]; c.push(v); return c; },
-  slice:   (a, from, to) => a.slice(parseInt(from), to !== undefined ? parseInt(to) : undefined),
-  arr:     (...items) => items,
-
-  // Number
-  int:     (s) => parseInt(s, 10),
-  float:   (s) => parseFloat(s),
-  add:     (a, b) => Number(a) + Number(b),
-  sub:     (a, b) => Number(a) - Number(b),
-  mul:     (a, b) => Number(a) * Number(b),
-
-  // Logic
-  eq:      (a, b) => a == b,
-  gt:      (a, b) => Number(a) > Number(b),
-  not:     (a) => !a,
-  is:      (a, type) => typeof a === type,
-  exists:  (a) => a !== null && a !== undefined,
-
-  // Object
-  keys:    (o) => Object.keys(o).filter(k => /^\d$/.test(k)).sort(),
-  set:     (o, k, v) => { const c = { ...o }; c[k] = v; return c; },
+  split: (s, sep) => String(s).split(sep),
+  chars: s => String(s).split(''),
+  get:   (a, i) => a[+i],
+  len:   a => a.length,
+  arr:   (...x) => x,
+  int:   s => parseInt(s),
+  sub:   (a, b) => +a - +b,
+  add:   (a, b) => +a + +b,
+  eq:    (a, b) => a == b,
+  not:   a => !a,
+  join:  (a, sep) => a.join(sep),
+  cat:   (...p) => p.join(''),
 };
 
-// ============ STAGE 2: UNFOLD ============
-// Read a Mode 4 block. Execute it step by step.
-// Each digit is a step. The _ text is the instruction.
-// Sub-digits are loop bodies or branches.
-//
-// Instruction format:  op arg1 arg2 ...
-//   $name  → function parameter (from context)
-//   #N     → result of step N
-//   #N.key → property of step N's result
-//   @path  → navigate the working tree
-//   Other  → literal (number if numeric, else string)
+// ---- THE UNFOLD ----
+// Walk a Mode 4 block: digits 1-9 are steps, _ is instruction.
+// $name = context, #N = step N result, literals pass through.
 
-export function unfold(program, context) {
-  const results = {};
+export function unfold(block, ctx) {
+  const r = {};
 
-  function resolve(token) {
-    if (token === 'null') return null;
-    if (token === 'true') return true;
-    if (token === 'false') return false;
-    if (token.startsWith('$')) return context[token.slice(1)];
-    if (token.startsWith('#')) {
-      const parts = token.slice(1).split('.');
-      let val = results[parts[0]];
-      for (let i = 1; i < parts.length; i++) val = val?.[parts[i]];
-      return val;
+  function val(t) {
+    if (t === 'null' || t === 'true' || t === 'false') return JSON.parse(t);
+    if (t[0] === '$') return ctx[t.slice(1)];
+    if (t[0] === '#') {
+      const p = t.slice(1).split('.');
+      let v = r[p[0]];
+      for (let i = 1; i < p.length; i++) v = v?.[p[i]];
+      return v;
     }
-    if (token.startsWith('@')) return nav(context._tree, token.slice(1));
-    if (!isNaN(token) && token !== '') return Number(token);
-    return token;
+    return isNaN(t) || t === '' ? t : Number(t);
   }
 
-  for (let step = 1; step <= 9; step++) {
-    const s = String(step);
-    const stepNode = program[s];
-    if (stepNode === undefined) continue;
+  for (let s = 1; s <= 9; s++) {
+    const k = String(s), nd = block[k];
+    if (nd === undefined) continue;
+    const ins = typeof nd === 'string' ? nd : nd?._;
+    if (!ins) continue;
+    const [op, ...raw] = ins.split(/\s+/);
+    const a = raw.map(val);
 
-    const instr = typeof stepNode === 'string' ? stepNode : stepNode?.['_'];
-    if (!instr) continue;
-
-    const tokens = instr.split(/\s+/);
-    const op = tokens[0];
-    const args = tokens.slice(1).map(resolve);
-
-    // Control flow
-    if (op === 'return') {
-      return args[0];
-    }
-
+    if (op === 'return') return a[0];
+    if (op === 'let') { ctx[String(a[0])] = a[1]; r[k] = a[1]; continue; }
     if (op === 'if') {
-      // Condition in args[0]. Digit 1 = true branch, digit 2 = false branch.
-      const branch = args[0] ? '1' : '2';
-      const branchNode = stepNode[branch];
-      if (branchNode) {
-        const branchInstr = typeof branchNode === 'string' ? branchNode : branchNode?.['_'];
-        if (branchInstr) {
-          const bt = branchInstr.split(/\s+/);
-          const bArgs = bt.slice(1).map(resolve);
-          results[s] = (RT[bt[0]] || context[bt[0]])?.(... bArgs) ?? bArgs[0];
-        }
+      const br = nd[a[0] ? '1' : '2'];
+      if (br) {
+        const [bop, ...ba] = (typeof br === 'string' ? br : br._).split(/\s+/);
+        r[k] = (RT[bop] || ctx[bop])?.(...ba.map(val)) ?? val(ba[0]);
       }
       continue;
     }
-
     if (op === 'each') {
-      // Iterate over args[0]. Execute sub-block for each item.
-      const items = args[0];
-      if (!Array.isArray(items)) { results[s] = []; continue; }
-      const collected = [];
-      for (let i = 0; i < items.length; i++) {
-        // Sub-context: $item, $i available
-        const subCtx = { ...context, item: items[i], i: i };
-        const subResult = unfold(stepNode, subCtx);
-        if (subResult !== undefined) collected.push(subResult);
+      if (!Array.isArray(a[0])) { r[k] = []; continue; }
+      const sub = { ...ctx }, out = [];
+      for (let i = 0; i < a[0].length; i++) {
+        sub.item = a[0][i]; sub.i = i;
+        const v = unfold(nd, sub);
+        if (v !== undefined) out.push(v);
       }
-      results[s] = collected;
-      continue;
+      r[k] = out; continue;
     }
-
-    if (op === 'let') {
-      // Store a value in context: let name value
-      context[String(args[0])] = args[1];
-      results[s] = args[1];
-      continue;
-    }
-
-    // Nav and read (Stage 0)
-    if (op === 'nav') { results[s] = nav(args[0], args[1]); continue; }
-    if (op === 'read') { results[s] = read(args[0]); continue; }
-
-    // Runtime primitives (Stage 1)
-    const fn = RT[op] || context[op];
-    if (fn) {
-      results[s] = fn(...args);
-      continue;
-    }
-
-    // Unknown op — store as literal
-    results[s] = instr;
+    if (op === 'nav')  { r[k] = nav(a[0], a[1]); continue; }
+    if (op === 'read') { r[k] = read(a[0]); continue; }
+    const fn = RT[op] || ctx[op];
+    r[k] = fn ? fn(...a) : ins;
   }
-
-  return context._result ?? results;
-}
-
-// ============ BOOTSTRAP ============
-// Given a touchstone tree, unfold BSP from its Mode 4 blocks.
-// This is how the box opens itself.
-
-export function bootstrap(touchstone) {
-  // The touchstone carries BSP as Mode 4 programs.
-  // The kernel reads them and produces functions.
-  // Each function is added to the context for subsequent unfolding.
-
-  const ctx = { _tree: touchstone };
-
-  return {
-    nav,
-    read,
-    unfold: (programPath, args) => {
-      const program = nav(touchstone, programPath);
-      if (!program) return null;
-      return unfold(program, { ...ctx, ...args });
-    },
-    RT,
-  };
+  return r;
 }
