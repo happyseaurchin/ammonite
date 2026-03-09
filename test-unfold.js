@@ -21,12 +21,12 @@ const BSP_SPINDLE = {
   4: { _: 'eq #2 0' },                                 // delineation?
   5: { _: 'if #4', 1: 'chars #3', 2: 'chars #2' },    // walk digits
   6: { _: 'if #4', 1: 'int 0', 2: 'len #2' },         // decimal position
-  7: { _: 'let decimal #6' },                          // store for loop access
+  7: { _: 'let whole #6' },                             // store for loop access
   8: { _: 'each #5',                                   // walk digits, collect
     1: 'nav $node $item',                               //   advance into tree
     2: 'let node #1',                                   //   carry node forward
     3: 'read #1',                                       //   text at this depth
-    4: 'sub $decimal $i',                               //   pscale = decimal - i
+    4: 'sub $whole $i',                                 //   pscale = whole - i
     5: 'sub #4 1',                                      //   adjust for 1-indexed depth
     6: { _: 'if #3', 1: 'arr #5 #3', 2: 'arr' },       //   [pscale, text] or []
     7: 'return #6',                                     //   yield to collector
