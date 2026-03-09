@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Ammonite boot — headless.
-// Assembles: shell (from file or memory) + storage adapter + LLM adapter → kernel.
+// Assembles: shell + storage adapter + LLM adapter + policy → kernel.
 // Usage:
 //   node ammonite/boot.js                        # echo LLM, memory storage
 //   node ammonite/boot.js --shell path/to/shell.json   # load from file
@@ -9,6 +9,7 @@
 //   node ammonite/boot.js --message "Hello"       # send a message
 
 import { createKernel } from './kernel.js';
+import { createHermitcrabPolicy } from './hermitcrab.js';
 import { createMemoryStorage } from './adapters/storage/memory.js';
 import { createFilesystemStorage } from './adapters/storage/filesystem.js';
 import { createEchoLLM } from './adapters/llm/echo.js';
@@ -43,8 +44,11 @@ const llm = flag('live')
   ? createAnthropicLLM(process.env.ANTHROPIC_API_KEY)
   : createEchoLLM();
 
-// Kernel
-const kernel = createKernel({ storage, llm });
+// Policy — hermitcrab is the default (and currently only) policy
+const policy = createHermitcrabPolicy();
+
+// Kernel — electricity + policy + adapters
+const kernel = createKernel({ storage, llm, policy });
 kernel.load();
 
 // ---- Act ----
