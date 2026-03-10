@@ -40,7 +40,7 @@
         "1": {
           "_": "User message. Someone is talking to you. Read purpose for context. Respond. Before ending: note anything important in stash, update purpose if direction changed.",
           "stimulus": "user",
-          "last": 1773168150
+          "last": 1773168080
         },
         "_": "Engagement thread."
       },
@@ -67,7 +67,6 @@
     },
     "3": {
       "1": "[2026-03-10T18:41:20.494Z echo:0] [echo] Hello, what are you?",
-      "2": "[2026-03-10T18:42:30.456Z echo:0] [echo] Hello, what are you?",
       "_": "History. Append-only — the kernel writes here after each activation. When digits 1-9 fill, entries compress. Depth is time: shallow is recent, deep is old.",
       "tuning": "8"
     },

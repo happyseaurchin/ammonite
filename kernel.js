@@ -11,20 +11,6 @@
 //
 // It does NOT: touch DOM, localStorage, filesystems, or network.
 // Those are adapter responsibilities, injected at boot.
-//
-// Shell layout (digits are conventional, not hardcoded in kernel):
-//   The kernel reads the shell's skeleton to discover which digit
-//   serves which role. But for the initial build, the convention is:
-//     1 = wake (spine, packages, invocation)
-//     2 = concerns (stimulus routing, temporal state)
-//     3 = history (growth tree, append-only)
-//     4 = stash (working memory)
-//     5 = purpose
-//     6 = relationships
-//     7 = cooking (recipes)
-//     8 = touchstone (format spec)
-//     9 = horizon (roadmap)
-//   These numbers live in the shell's skeleton, not in the kernel.
 
 import {
   bsp, anchor, navigate, readNode, writeNode,
@@ -35,11 +21,9 @@ import {
 // ============ CREATE KERNEL ============
 
 export function createKernel({ storage, llm, log }) {
-  // log is optional: { info, error } — defaults to console
   const L = log || { info: console.log, error: console.error };
 
-  // Shell address map — discovered from skeleton, with defaults.
-  // The kernel asks the shell where things are, not the other way around.
+  // Shell address map — defaults, discoverable from skeleton.
   const ADDR = {
     wake: '1',
     concerns: '2',
@@ -47,15 +31,12 @@ export function createKernel({ storage, llm, log }) {
     stash: '4',
     purpose: '5',
     relationships: '6',
-    cooking: '7',
-    touchstone: '8',
-    horizon: '9',
   };
 
-  let _shell = null;   // The live shell in memory
-  let _ctx = null;      // { echo, changed, concern } during a twist
-  let _lock = false;    // Activation lock — one twist at a time
-  let _conversations = new Map(); // concern path → message history
+  let _shell = null;
+  let _ctx = null;
+  let _lock = false;
+  let _conversations = new Map();
 
   // ---- Shell access ----
 
@@ -71,8 +52,6 @@ export function createKernel({ storage, llm, log }) {
 
   function shell() { return _shell; }
 
-  // ---- Anchored access (the replacement for blockLoad) ----
-
   function at(digit) {
     if (!_shell) load();
     return anchor(_shell, digit);
@@ -80,21 +59,9 @@ export function createKernel({ storage, llm, log }) {
 
   // ---- Concern system ----
 
-  function tierFromPscale(pscale) {
-    const a = at(ADDR.concerns);
-    if (!a) return 1;
-    const tiers = a.shell.tree.tiers || {};
-    const tierMap = { deep: 3, present: 2, light: 1 };
-    const thresholds = Object.keys(tiers).map(Number).sort((a, b) => b - a);
-    for (const t of thresholds) {
-      if (pscale >= t) return tierMap[tiers[String(t)]] || 1;
-    }
-    return 1;
-  }
-
   function findConcern(stimulus) {
     const a = at(ADDR.concerns);
-    if (!a) return { spindle: '0.1211111', tier: 2, name: 'user' };
+    if (!a) return { name: 'user', path: null };
     const tuningDecimal = getTuningDecimalPosition(a.shell) || 9;
     let found = null;
     function walk(node, depth, path) {
@@ -104,17 +71,11 @@ export function createKernel({ storage, llm, log }) {
         if (!v || typeof v !== 'object') continue;
         const childPath = path ? `${path}.${k}` : k;
         if (v.stimulus && v.stimulus.toLowerCase() === stimulus.toLowerCase()) {
-          const pscale = tuningDecimal - (depth + 1);
           found = {
-            spindle: v.spine || '0.1211111',
-            tier: tierFromPscale(pscale),
             name: v._ || stimulus,
-            immediate: !!v.immediate,
-            focus: v.focus || null,
-            package: v.package || null,
-            tools: v.tools || null,
-            pscale,
             path: childPath,
+            pscale: tuningDecimal - (depth + 1),
+            model: v.model || null,
           };
           return;
         }
@@ -122,7 +83,7 @@ export function createKernel({ storage, llm, log }) {
       }
     }
     walk(a.tree, 0, '');
-    return found || { spindle: '0.1211111', tier: 2, name: 'user' };
+    return found || { name: 'user', path: null };
   }
 
   function whatsRipe(nowSeconds) {
@@ -137,15 +98,16 @@ export function createKernel({ storage, llm, log }) {
         if (!/^\d$/.test(k) || !v || typeof v !== 'object') continue;
         const childPath = path ? `${path}.${k}` : k;
         const pscale = tuningDecimal - (depth + 1);
-        if (v.last !== undefined && !v.immediate) {
+        // Skip event-driven concerns (they have stimulus)
+        if (v.last !== undefined && !v.stimulus) {
           const period = periods[pscale];
           if (period) {
             const phase = (nowSeconds - (v.last || 0)) / period;
             if (phase >= 1.0) {
               ripe.push({
-                path: childPath, phase, text: v._ || childPath,
-                spine: v.spine, pscale, focus: v.focus || null,
-                package: v.package || null,
+                path: childPath, phase, pscale,
+                text: v._ || childPath,
+                model: v.model || null,
               });
             }
           }
@@ -168,22 +130,21 @@ export function createKernel({ storage, llm, log }) {
     }
   }
 
-  // ---- Package & invocation (read from wake subtree) ----
+  // ---- Package & invocation ----
 
-  function readPackage(tier, overrideAddr) {
+  function readPackage() {
     const a = at(ADDR.wake);
     if (!a) return [];
-    const addr = overrideAddr || ('9.' + tier);
-    const s = a.spread(addr);
+    const s = a.spread('9.1');
     if (!s) return [];
     return s.children.filter(c => c.text).map(c => c.text);
   }
 
-  function readInvocation(tier) {
+  function readInvocation(modelOverride) {
     const a = at(ADDR.wake);
-    if (!a) return { model: 'claude-sonnet-4-6', max_tokens: 16384 };
-    const s = a.spread('9.' + (tier + 3));
-    if (!s) return { model: 'claude-sonnet-4-6', max_tokens: 16384 };
+    if (!a) return { model: 'claude-haiku-4-5-20251001', max_tokens: 4096 };
+    const s = a.spread('9.2');
+    if (!s) return { model: 'claude-haiku-4-5-20251001', max_tokens: 4096 };
     const params = {};
     for (const child of s.children) {
       if (child.text) {
@@ -192,8 +153,8 @@ export function createKernel({ storage, llm, log }) {
       }
     }
     const result = {
-      model: params.model || 'claude-sonnet-4-6',
-      max_tokens: parseInt(params.max_tokens) || 16384,
+      model: modelOverride || params.model || 'claude-haiku-4-5-20251001',
+      max_tokens: parseInt(params.max_tokens) || 4096,
     };
     if (params.thinking) {
       const parts = params.thinking.split(' ');
@@ -223,10 +184,6 @@ export function createKernel({ storage, llm, log }) {
   }
 
   function parseInstruction(instr) {
-    // In ammonite, instructions use addresses, not block names.
-    // "1 0.21" → bsp(shell, anchor at 1, address 0.21)
-    // But they can also be full-shell addresses: "0.121" → bsp on whole shell.
-    // Convention: first token is a digit (subtree) or a semantic number (whole shell).
     const parts = instr.trim().split(/\s+/);
 
     if (parts.length === 2 && parts[1] === 'skeleton') {
@@ -250,7 +207,6 @@ export function createKernel({ storage, llm, log }) {
     const parsed = parseInstruction(instr);
     const { root, spindle, point, fn } = parsed;
 
-    // Anchor at the root digit
     const a = at(root);
     if (!a) return '';
 
@@ -284,46 +240,44 @@ export function createKernel({ storage, llm, log }) {
     return '';
   }
 
-  function compileCurrents(concern, echo) {
+  function compileCurrents(concern) {
     const sections = [];
 
-    // §A — Spine spindle from wake
+    // §A — Wake orientation
     const wakeAnchor = at(ADDR.wake);
     if (wakeAnchor) {
-      const spineResult = wakeAnchor.bsp(parseFloat(concern.spindle));
-      if (spineResult.mode === 'spindle' && spineResult.nodes.length > 0) {
-        sections.push(`[spine ${concern.spindle}]\n${spineResult.nodes.map(n => `  [${n.pscale}] ${n.text}`).join('\n')}`);
-      }
-    }
-
-    // §A.5 — Concern dashboard
-    const concernAnchor = at(ADDR.concerns);
-    const tierNames = { 3: 'deep', 2: 'present', 1: 'light' };
-    const dashboard = concernAnchor?.shell?.tree?.dashboard || {};
-    const strategy = dashboard[tierNames[concern.tier] || 'light'] || 'ripe';
-    const concernLines = ['[concerns]'];
-    if (strategy === 'full' && concernAnchor) {
-      concernLines.push(formatTree(concernAnchor.tree));
-    } else if (strategy === 'roots' && concernAnchor) {
-      const concernDisc = concernAnchor.bsp(null, 8, 'disc');
-      if (concernDisc.mode === 'disc') {
-        for (const c of concernDisc.nodes) {
-          concernLines.push(`  ${c.path}: ${c.text || '(branch)'}`);
+      const lines = [];
+      if (wakeAnchor.tree._) lines.push(wakeAnchor.tree._);
+      // Walk the orientation subtree (wake.1)
+      const orient = wakeAnchor.tree['1'];
+      if (orient && typeof orient === 'object') {
+        if (orient._) lines.push(orient._);
+        for (let d = 1; d <= 9; d++) {
+          const v = orient[String(d)];
+          if (typeof v === 'string') lines.push(`  ${v}`);
         }
       }
+      if (lines.length > 0) sections.push(`[wake]\n${lines.join('\n')}`);
     }
+
+    // §B — Concern instruction
+    if (concern.name) {
+      sections.push(`[concern]\n${concern.name}`);
+    }
+
+    // §C — Ripe concerns
     const ripeSet = whatsRipe(Date.now() / 1000);
     if (ripeSet.length > 0) {
-      concernLines.push('  [ripe]');
+      const ripeLines = ['[ripe concerns]'];
       for (const r of ripeSet) {
         const urgency = r.phase > 2.0 ? ' (significantly overdue)' : r.phase > 1.5 ? ' (overdue)' : '';
-        concernLines.push(`    [${r.pscale}] ${r.text} — phase ${r.phase.toFixed(2)}${urgency}`);
+        ripeLines.push(`  ${r.text} — phase ${r.phase.toFixed(2)}${urgency}`);
       }
+      sections.push(ripeLines.join('\n'));
     }
-    if (concernLines.length > 1) sections.push(concernLines.join('\n'));
 
-    // §B — Package currents
-    const instructions = readPackage(concern.tier, concern.package);
+    // §D — Package currents
+    const instructions = readPackage();
     for (const instr of instructions) {
       const result = executeInstruction(instr);
       if (result) sections.push(result);
@@ -335,18 +289,14 @@ export function createKernel({ storage, llm, log }) {
   // ---- Focus (conversation history) ----
 
   function compileFocus(concern) {
-    const focus = concern.focus || { dialogue: 'none' };
-    const messages = [];
-    if (focus.dialogue && focus.dialogue !== 'none') {
-      const history = _conversations.get(concern.path) || [];
-      if (focus.dialogue === 'full') {
-        messages.push(...history);
-      } else {
-        const n = parseInt(focus.dialogue.replace('last-', '')) || 5;
-        messages.push(...history.slice(-(n * 2)));
-      }
+    const history = _conversations.get(concern.path) || [];
+    if (history.length === 0) return [];
+    // Event-driven concerns (with stimulus) get recent conversation history
+    // Periodic concerns get none
+    if (concern.stimulus) {
+      return history.slice(-16); // last 8 exchanges
     }
-    return messages;
+    return [];
   }
 
   // ---- Tools ----
@@ -393,12 +343,11 @@ export function createKernel({ storage, llm, log }) {
     },
     {
       name: 'call_llm',
-      description: 'Delegate to another tier. With stimulus: route through concern system.',
+      description: 'Delegate to another LLM call. With stimulus: route through concern system.',
       input_schema: {
         type: 'object',
         properties: {
           prompt: { type: 'string' },
-          model: { type: 'string', enum: ['default', 'fast'] },
           system: { type: 'string' },
           stimulus: { type: 'string' },
         },
@@ -406,13 +355,6 @@ export function createKernel({ storage, llm, log }) {
       },
     },
   ];
-
-  function toolsForConcern(concern) {
-    if (concern.tools && Array.isArray(concern.tools)) {
-      return TOOLS.filter(t => concern.tools.includes(t.name));
-    }
-    return TOOLS;
-  }
 
   async function executeTool(name, input) {
     switch (name) {
@@ -461,14 +403,12 @@ export function createKernel({ storage, llm, log }) {
           }
           return JSON.stringify({ triggered: input.stimulus, resolved: true });
         }
-        const tier = input.model === 'fast' ? 1 : 3;
-        const inv = readInvocation(tier);
+        const inv = readInvocation();
         const res = await llm.call({
           model: inv.model,
           max_tokens: inv.max_tokens,
           system: input.system || 'Complete the task. Return only the result.',
           messages: [{ role: 'user', content: input.prompt }],
-          thinking: inv.thinking,
         });
         return (res.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n') || '(no response)';
       }
@@ -510,7 +450,7 @@ export function createKernel({ storage, llm, log }) {
 
         // THE TWIST: echo increments, currents recompile, context shifts
         _ctx.echo++;
-        const freshSystem = compileCurrents(concern, _ctx.echo);
+        const freshSystem = compileCurrents(concern);
         params = { ...params, system: freshSystem };
         _ctx.changed.clear();
 
@@ -592,7 +532,6 @@ export function createKernel({ storage, llm, log }) {
       const pos = findHistoryWritePosition();
 
       if (!pos.full) {
-        // Write into the history subtree (address relative to history root)
         const fullPath = `${ADDR.history}.${pos.path}`;
         writeNode(_shell.tree, fullPath, text);
         save();
@@ -604,12 +543,12 @@ export function createKernel({ storage, llm, log }) {
 
   async function triggerConcern(stimulus, message) {
     const concern = findConcern(stimulus);
-    const inv = readInvocation(concern.tier);
-    const system = compileCurrents(concern, 0);
+    const inv = readInvocation(concern.model);
+    const system = compileCurrents(concern);
     const params = {
       model: inv.model, max_tokens: inv.max_tokens, system,
       messages: [{ role: 'user', content: message }],
-      tools: toolsForConcern(concern), thinking: inv.thinking,
+      tools: TOOLS, thinking: inv.thinking,
     };
     if (inv.thinking && params.max_tokens <= (inv.thinking.budget_tokens || 0)) {
       params.max_tokens = (inv.thinking.budget_tokens || 0) + 1024;
@@ -624,8 +563,8 @@ export function createKernel({ storage, llm, log }) {
       if (!_shell) load();
       const concern = findConcern(stimulus);
       if (concern.path) updateConcernTimestamp(concern.path, Date.now() / 1000);
-      const inv = readInvocation(opts.tier || concern.tier);
-      const system = opts.system || compileCurrents(concern, 0);
+      const inv = readInvocation(opts.model || concern.model);
+      const system = opts.system || compileCurrents(concern);
       const focusMessages = compileFocus(concern);
       const allInput = [...focusMessages, ...(message ? [{ role: 'user', content: message }] : [])];
       const params = {
@@ -633,7 +572,7 @@ export function createKernel({ storage, llm, log }) {
         max_tokens: opts.max_tokens || inv.max_tokens,
         system,
         messages: allInput,
-        tools: toolsForConcern(concern),
+        tools: TOOLS,
         thinking: inv.thinking,
       };
       if (inv.thinking && params.max_tokens <= (inv.thinking.budget_tokens || 0)) {
@@ -658,39 +597,26 @@ export function createKernel({ storage, llm, log }) {
     if (ripe.length === 0) return;
     const top = ripe[0];
 
-    // Mechanical heartbeat for low-pscale concerns
-    if (top.pscale <= 4) {
-      const a = at(ADDR.concerns);
-      if (a) {
-        updateConcernTimestamp(top.path, Date.now() / 1000);
-        L.info('[ammonite] heartbeat: mechanical OK');
-        return;
-      }
-    }
-
-    const tier = tierFromPscale(top.pscale);
     const concern = {
-      spindle: top.spine || '0.1111111', tier, name: top.text,
-      path: top.path, focus: top.focus, package: top.package || null, tools: null,
+      name: top.text, path: top.path,
+      pscale: top.pscale, model: top.model,
     };
-    L.info(`[ammonite] concern: ${top.text} phase=${top.phase.toFixed(2)} → tier ${tier}`);
+    L.info(`[ammonite] concern: ${top.text} phase=${top.phase.toFixed(2)}`);
 
     _lock = true;
     try {
-      const inv = readInvocation(tier);
-      const system = compileCurrents(concern, 0);
-      const focusMessages = compileFocus(concern);
+      const inv = readInvocation(concern.model);
+      const system = compileCurrents(concern);
       const msg = { role: 'user', content: `CONCERN ACTIVATION — ${top.text} (phase ${top.phase.toFixed(2)}). Address this concern, then use concern_update to mark it handled.` };
       const params = {
         model: inv.model, max_tokens: inv.max_tokens, system,
-        messages: [...focusMessages, msg],
-        tools: toolsForConcern(concern), thinking: inv.thinking,
+        messages: [msg],
+        tools: TOOLS, thinking: inv.thinking,
       };
       if (inv.thinking && params.max_tokens <= (inv.thinking.budget_tokens || 0)) {
         params.max_tokens = (inv.thinking.budget_tokens || 0) + 1024;
       }
-      const response = await twist(params, concern);
-      if (response._messages) _conversations.set(concern.path, response._messages);
+      await twist(params, concern);
     } catch (e) {
       L.error('[ammonite] concern activation failed:', e);
     } finally {
@@ -702,23 +628,19 @@ export function createKernel({ storage, llm, log }) {
   // ---- Public interface ----
 
   return {
-    // Shell access
     load,
     save,
     shell: () => _shell,
     at,
     bsp: (address, point, fn) => bsp(_shell, address, point, fn),
 
-    // Concern system
     findConcern,
     whatsRipe: () => whatsRipe(Date.now() / 1000),
 
-    // Actions
-    activate,    // stimulus + message → response (the main entry point)
-    tick,        // check ripe concerns, fire most urgent
+    activate,
+    tick,
     triggerConcern,
 
-    // Direct access (for adapters)
     compileCurrents,
     tools: TOOLS,
   };
